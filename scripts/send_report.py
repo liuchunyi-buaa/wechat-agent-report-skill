@@ -3,6 +3,7 @@ import argparse
 import datetime
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -69,7 +70,7 @@ def truncate(text, limit):
     return text[: max(0, limit - 1)] + "…", True
 
 
-def build_message(fmt, title, summary, special, now):
+def build_message(fmt, title, summary, special, now, device):
     lines = []
     for line in fmt.split("\n"):
         if "{special}" in line and not special:
@@ -79,6 +80,7 @@ def build_message(fmt, title, summary, special, now):
             .replace("{summary}", summary)
             .replace("{special}", special or "")
             .replace("{time}", now)
+            .replace("{device}", device)
         )
     return "\n".join(lines)
 
@@ -133,12 +135,14 @@ def main():
         print("警告：摘要超过 %d 字，已截断" % limit, file=sys.stderr)
 
     now = args.time or datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    device = socket.gethostname().split(".")[0]
     message = build_message(
         resolve_template(args.config, cfg),
         args.title.strip(),
         summary,
         args.special.strip(),
         now,
+        device,
     )
 
     send_via_ui(cfg, message)

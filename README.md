@@ -50,7 +50,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 
 模板放在 `~/.claude/wechat-agent-report/references/`，每个 agent 一个文件。
 
-占位符：`{title}`、`{summary}`、`{special}`、`{time}`。只有 `{special}` 的那一行在未提供特别说明时会自动删除。
+占位符：`{title}`、`{summary}`、`{special}`、`{time}`、`{device}`。只有 `{special}` 的那一行在未提供特别说明时会自动删除；`{device}` 自动填当前电脑的主机名。
 
 `references/daily-summary.md`：
 
@@ -59,6 +59,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 {summary}
 <特别说明>{special}
 「{time}」
+「{device}」
 ```
 
 新增 agent：

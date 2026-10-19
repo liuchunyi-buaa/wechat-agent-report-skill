@@ -55,7 +55,7 @@ python3 ~/.claude/skills/wechat-agent-report/scripts/send_report.py \
 
 ## Agent Templates
 
-Templates live in `~/.claude/wechat-agent-report/references/`. Placeholders: `{title}`, `{summary}`, `{special}`, `{time}`. A line containing only `{special}` is dropped when no special note is given.
+Templates live in `~/.claude/wechat-agent-report/references/`. Placeholders: `{title}`, `{summary}`, `{special}`, `{time}`, `{device}`. A line containing only `{special}` is dropped when no special note is given. `{device}` is the submitting machine's hostname.
 
 daily-summary:
 
@@ -64,6 +64,7 @@ daily-summary:
 {summary}
 <特别说明>{special}
 「{time}」
+「{device}」
 ```
 
 ## How Sending Works
