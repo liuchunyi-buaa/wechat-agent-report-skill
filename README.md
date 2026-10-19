@@ -4,11 +4,35 @@
 
 ## 安装
 
+### macOS / Linux
+
 ```bash
 git clone https://github.com/liuchunyi-buaa/wechat-agent-report-skill.git
 cd wechat-agent-report-skill
 bash install.sh
 ```
+
+### Windows
+
+```powershell
+git clone https://github.com/liuchunyi-buaa/wechat-agent-report-skill.git
+cd wechat-agent-report-skill
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
+
+依赖 Python 3 和 `requests`、`cryptography`：
+
+```powershell
+python -m pip install requests cryptography
+```
+
+Windows 上的 `clawbot_dir` 使用 Windows 路径，例如 `C:\Users\you\clawbot`。如果该目录没有登录凭证，先运行：
+
+```powershell
+python C:\Users\you\clawbot\clawbot.py login
+```
+
+然后用手机微信扫码。
 
 安装后：
 

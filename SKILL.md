@@ -81,9 +81,21 @@ Global config: `~/.claude/wechat-agent-report/config.json`
 
 ## Deployment
 
+macOS / Linux:
+
 ```bash
 git clone https://github.com/liuchunyi-buaa/wechat-agent-report-skill.git
 cd wechat-agent-report-skill
 bash install.sh
 # then edit ~/.claude/wechat-agent-report/config.json
+```
+
+Windows (PowerShell):
+
+```powershell
+git clone https://github.com/liuchunyi-buaa/wechat-agent-report-skill.git
+cd wechat-agent-report-skill
+powershell -ExecutionPolicy Bypass -File install.ps1
+python -m pip install requests cryptography
+# then edit %USERPROFILE%\.claude\wechat-agent-report\config.json
 ```
