@@ -1,0 +1,9 @@
+{
+  "agents": {
+    "daily-summary": {
+      "clawbot_dir": "/Users/liuchunyi/study/notification/clawbot",
+      "max_words": 200,
+      "format": "【{title}】\n{summary}\n我的特别指示：{special}\n「{time}」"
+    }
+  }
+}
