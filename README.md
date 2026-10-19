@@ -22,9 +22,10 @@ bash install.sh
 git clone https://github.com/liuchunyi-buaa/wechat-agent-report-skill.git
 cd wechat-agent-report-skill
 powershell -ExecutionPolicy Bypass -File install.ps1
+python -m pip install winsdk pillow
 ```
 
-需要 Windows 微信客户端和 PowerShell 5+。
+需要 Windows 微信客户端（4.x）和 Python 3。OCR 依赖 `winsdk`（Windows 自带 OCR）和 `pillow`；还需安装中文（简体）OCR 语言包。`install.ps1` 只负责复制文件，发送逻辑在 `send_report.py` 中运行，不需要 PowerShell。
 
 ## 配置
 
@@ -69,16 +70,22 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 
 ## 使用
 
+Windows 使用 `python`，macOS / Linux 使用 `python3`。
+
 ```bash
 # 查看已配置的 agent
-python3 ~/.claude/skills/wechat-agent-report/scripts/send_report.py --list
+python ~/.claude/skills/wechat-agent-report/scripts/send_report.py --list
 
 # 发送
-python3 ~/.claude/skills/wechat-agent-report/scripts/send_report.py \
+python ~/.claude/skills/wechat-agent-report/scripts/send_report.py \
   --agent daily-summary \
   --title "完成登录页重构" \
   --summary "重构了表单校验和错误提示，补充 6 个单元测试，已合并。" \
   --special "下次优先处理移动端适配"
+
+# 只定位对话并填入消息，不按回车（验证用）
+python ~/.claude/skills/wechat-agent-report/scripts/send_report.py \
+  --agent daily-summary --title "测试" --summary "测试内容" --dry-run
 ```
 
 `--special` 可省略，时间自动填当前时间。
@@ -86,10 +93,11 @@ python3 ~/.claude/skills/wechat-agent-report/scripts/send_report.py \
 ## 发送原理
 
 1. 按模板生成消息
-2. 激活微信，搜索并打开 `wechat_name`
-3. 粘贴消息并回车
+2. 激活微信并搜索 `wechat_name`
+3. 对搜索区域截图并 OCR，点击包含“微信 ClawBot”的对话行
+4. Windows 额外校验已打开对话的标题，然后粘贴消息并回车
 
-macOS 用 AppleScript，Windows 用 PowerShell SendKeys。发送时会短暂占用键盘焦点，请勿同时操作键鼠。
+macOS 使用 AppleScript + Vision OCR（`find_and_click.swift`）；Windows 在 `send_report.py` 中使用 Windows OCR + Pillow，流程与 macOS 一致，不使用 PowerShell。发送时会短暂占用键盘焦点，请勿同时操作键鼠。
 
 ## 为什么不用 ClawBot API
 
@@ -101,6 +109,9 @@ ClawBot 的出站消息不会回到 `getupdates`。通过 API 发送（BOT 消�
 |------|------|
 | 打开了错误的对话 | `wechat_name` 必须与微信搜索显示完全一致 |
 | 消息发到别的窗口 | 脚本会激活微信，运行期间不要抢焦点 |
+| Windows 报“缺少依赖” | 运行 `python -m pip install winsdk pillow` |
+| Windows 报“在搜索结果中找不到对话” | 确认微信窗口未被缩放或拖动，且已安装中文 OCR 语言包 |
+| 想先验证但不发送 | 加 `--dry-run` |
 | 摘要被截断 | 缩短摘要或调大 `max_words` |
 | 没有特别说明 | 正常，模板中那一行会自动省略 |
 
@@ -109,6 +120,7 @@ ClawBot 的出站消息不会回到 `getupdates`。通过 API 发送（BOT 消�
 ```
 wechat-agent-report-skill/
 ├── SKILL.md
+├── README.md
 ├── install.sh
 ├── install.ps1
 ├── config.example.json
@@ -117,5 +129,5 @@ wechat-agent-report-skill/
 └── scripts/
     ├── send_report.py
     ├── send_ui_macos.sh
-    └── send_ui_windows.ps1
+    └── find_and_click.swift
 ```

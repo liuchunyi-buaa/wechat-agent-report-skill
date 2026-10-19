@@ -8,7 +8,6 @@ New-Item -ItemType Directory -Force -Path (Join-Path $SkillDest "scripts"), (Joi
 Copy-Item (Join-Path $Src "SKILL.md") (Join-Path $SkillDest "SKILL.md") -Force
 Copy-Item (Join-Path $Src "scripts\send_report.py") (Join-Path $SkillDest "scripts\send_report.py") -Force
 Copy-Item (Join-Path $Src "scripts\send_ui_macos.sh") (Join-Path $SkillDest "scripts\send_ui_macos.sh") -Force
-Copy-Item (Join-Path $Src "scripts\send_ui_windows.ps1") (Join-Path $SkillDest "scripts\send_ui_windows.ps1") -Force
 Copy-Item (Join-Path $Src "references\*") (Join-Path $ConfigDir "references") -Force
 
 $Config = Join-Path $ConfigDir "config.json"
@@ -20,6 +19,8 @@ if (-not (Test-Path $Config)) {
 }
 
 Write-Host "安装完成。"
-Write-Host "1. 编辑 $Config，填写 wechat_name（微信里显示的对话名）"
-Write-Host "2. 运行：python `"$SkillDest\scripts\send_report.py`" --list"
-Write-Host "3. 发送：python `"$SkillDest\scripts\send_report.py`" --agent daily-summary --title `"标题`" --summary `"完成内容`""
+Write-Host "1. 若未安装 OCR 依赖，请运行：python -m pip install winsdk pillow"
+Write-Host "2. 编辑 $Config，填写 wechat_name（微信里显示的对话名）"
+Write-Host "3. 运行：python `"$SkillDest\scripts\send_report.py`" --list"
+Write-Host "4. 发送：python `"$SkillDest\scripts\send_report.py`" --agent daily-summary --title `"标题`" --summary `"完成内容`""
+Write-Host "   仅验证不发送：在上面命令后加 --dry-run"

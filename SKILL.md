@@ -20,9 +20,9 @@ Do NOT use this for ordinary people or group chats.
 ## Quick Reference
 
 ```bash
-python3 ~/.claude/skills/wechat-agent-report/scripts/send_report.py --list
+python ~/.claude/skills/wechat-agent-report/scripts/send_report.py --list
 
-python3 ~/.claude/skills/wechat-agent-report/scripts/send_report.py \
+python ~/.claude/skills/wechat-agent-report/scripts/send_report.py \
   --agent daily-summary \
   --title "完成登录页重构" \
   --summary "重构了表单校验和错误提示，补充 6 个单元测试，已合并到 main。" \
@@ -70,17 +70,27 @@ daily-summary:
 ## How Sending Works
 
 1. Builds the message from the agent's template.
-2. Activates WeChat, searches `wechat_name`, opens the first result.
-3. Pastes the message into the input box and presses Enter.
+2. Brings WeChat to the front, searches `wechat_name`, screenshots the window
+   region, and OCRs the result list.
+3. Clicks the row containing "微信 ClawBot" (the real conversation, not a
+   search suggestion). On Windows the opened chat title is verified before
+   anything is sent.
+4. Pastes the message into the input box and presses Enter.
 
-macOS uses AppleScript; Windows uses PowerShell SendKeys. Both briefly take keyboard focus.
+macOS uses AppleScript + Vision OCR (`find_and_click.swift`). Windows uses the
+same screenshot-and-OCR approach inside `send_report.py` (Windows OCR +
+Pillow); PowerShell is not used at runtime. Both briefly take keyboard focus.
+
+Use `--dry-run` to locate the conversation and fill in the message without
+pressing Enter.
 
 ## Requirements
 
 - WeChat desktop client logged in, with the agent conversation visible in search
 - macOS: Accessibility permission for the terminal/Claude
-- Windows: PowerShell 5+, WeChat desktop client
-- Do not type or click while the script is running
+- Windows: Python 3, `pip install winsdk pillow`, and a Chinese OCR language
+  pack, plus the WeChat 4.x desktop client
+- Do not type, click, or resize the WeChat window while the script is running
 
 ## Common Mistakes
 
@@ -88,6 +98,8 @@ macOS uses AppleScript; Windows uses PowerShell SendKeys. Both briefly take keyb
 |---|---|
 | Wrong conversation opened | Use the exact `wechat_name` from WeChat search |
 | Text sent to the wrong window | The script activates WeChat; do not steal focus mid-run |
+| "缺少依赖" on Windows | Run `pip install winsdk pillow` |
+| "在搜索结果中找不到对话" | Make sure WeChat is not being resized while it runs |
 | Summary truncated | Shorten it or raise `max_words` |
 | Special note missing | It is optional; omit `--special` |
 
@@ -108,5 +120,9 @@ Windows (PowerShell):
 git clone https://github.com/liuchunyi-buaa/wechat-agent-report-skill.git
 cd wechat-agent-report-skill
 powershell -ExecutionPolicy Bypass -File install.ps1
+python -m pip install winsdk pillow
 # then edit %USERPROFILE%\.claude\wechat-agent-report\config.json
 ```
+
+`install.ps1` only copies files; sending itself runs in Python and does not
+use PowerShell.
