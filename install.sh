@@ -5,10 +5,17 @@ SRC="$(cd "$(dirname "$0")" && pwd)"
 SKILL_DEST="$HOME/.claude/skills/wechat-agent-report"
 CONFIG_DIR="$HOME/.claude/wechat-agent-report"
 
-mkdir -p "$SKILL_DEST/scripts" "$CONFIG_DIR"
+mkdir -p "$SKILL_DEST/scripts" "$CONFIG_DIR/references"
 cp "$SRC/SKILL.md" "$SKILL_DEST/SKILL.md"
-cp "$SRC/scripts/send_report.py" "$SKILL_DEST/scripts/send_report.py"
-chmod +x "$SKILL_DEST/scripts/send_report.py"
+cp "$SRC/scripts/send_report.py" "$SKILL_DEST/scripts/"
+cp "$SRC/scripts/send_ui_macos.sh" "$SKILL_DEST/scripts/"
+cp "$SRC/scripts/send_ui_windows.ps1" "$SKILL_DEST/scripts/"
+cp "$SRC/scripts/find_and_click.swift" "$SKILL_DEST/scripts/"
+cp "$SRC/references/"* "$CONFIG_DIR/references/"
+chmod +x "$SKILL_DEST/scripts/send_report.py" "$SKILL_DEST/scripts/send_ui_macos.sh"
+if command -v swiftc >/dev/null 2>&1; then
+    swiftc -O "$SKILL_DEST/scripts/find_and_click.swift" -o "$SKILL_DEST/scripts/find_and_click" 2>/dev/null || true
+fi
 
 if [ ! -f "$CONFIG_DIR/config.json" ]; then
     cp "$SRC/config.example.json" "$CONFIG_DIR/config.json"
@@ -18,6 +25,7 @@ else
 fi
 
 echo "安装完成。"
-echo "1. 编辑 $CONFIG_DIR/config.json，把 clawbot_dir 指向你的 ClawBot 目录"
-echo "2. 运行：python3 $SKILL_DEST/scripts/send_report.py --list"
-echo "3. 发送：python3 $SKILL_DEST/scripts/send_report.py --agent daily-summary --title \"标题\" --summary \"完成内容\""
+echo "1. 编辑 $CONFIG_DIR/config.json，填写 wechat_name（微信里显示的对话名）"
+echo "2. macOS 需在「系统设置 → 隐私与安全性 → 辅助功能」中允许终端/Claude"
+echo "3. 运行：python3 $SKILL_DEST/scripts/send_report.py --list"
+echo "4. 发送：python3 $SKILL_DEST/scripts/send_report.py --agent daily-summary --title \"标题\" --summary \"完成内容\""

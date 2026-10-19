@@ -8,7 +8,52 @@ import sys
 import tempfile
 
 DEFAULT_CONFIG = os.path.expanduser("~/.claude/wechat-agent-report/config.json")
-DEFAULT_FORMAT = "【{title}】\n{summary}\n{special}\n「{time}」"
+DEFAULT_FORMAT = "【{title}】\n{summary}\n<特别说明>{special}\n「{time}」"
+
+
+def resolve_template(config_path, cfg):
+    ref = cfg.get("reference")
+    if ref:
+        base = os.path.dirname(os.path.abspath(config_path))
+        path = ref if os.path.isabs(ref) else os.path.join(base, ref)
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                return f.read().strip("\n")
+        print("警告：找不到 reference %s，改用 format" % path, file=sys.stderr)
+    return cfg.get("format", DEFAULT_FORMAT)
+
+
+def send_via_ui(cfg, message):
+    name = (cfg.get("wechat_name") or "").strip()
+    if not name:
+        sys.exit("配置缺少 wechat_name（微信里显示的对话名称）")
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    env = os.environ.copy()
+    name_fd, name_path = tempfile.mkstemp(prefix="wechat-name-", suffix=".txt")
+    msg_fd, msg_path = tempfile.mkstemp(prefix="wechat-msg-", suffix=".txt")
+    try:
+        with os.fdopen(name_fd, "w", encoding="utf-8") as f:
+            f.write(name)
+        with os.fdopen(msg_fd, "w", encoding="utf-8") as f:
+            f.write(message)
+        env["WECHAT_AGENT_NAME_FILE"] = name_path
+        env["WECHAT_AGENT_MESSAGE_FILE"] = msg_path
+        if sys.platform == "darwin":
+            cmd = ["bash", os.path.join(script_dir, "send_ui_macos.sh")]
+        elif sys.platform.startswith("win"):
+            cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File",
+                   os.path.join(script_dir, "send_ui_windows.ps1")]
+        else:
+            sys.exit("仅支持 macOS 和 Windows")
+        result = subprocess.run(cmd, env=env)
+        if result.returncode != 0:
+            sys.exit("界面发送失败，退出码 %d" % result.returncode)
+    finally:
+        for path in (name_path, msg_path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
 
 def load_config(path):
@@ -44,7 +89,7 @@ def cmd_list(config):
         print("没有配置任何 agent")
         return
     for name, cfg in agents.items():
-        print("%s\t%s" % (name, cfg.get("clawbot_dir", "")))
+        print("%s\t%s" % (name, cfg.get("wechat_name") or cfg.get("clawbot_dir", "")))
 
 
 def main():
@@ -89,33 +134,14 @@ def main():
 
     now = args.time or datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     message = build_message(
-        cfg.get("format", DEFAULT_FORMAT),
+        resolve_template(args.config, cfg),
         args.title.strip(),
         summary,
         args.special.strip(),
         now,
     )
 
-    clawbot_dir = os.path.expanduser(cfg.get("clawbot_dir", ""))
-    clawbot = os.path.join(clawbot_dir, "clawbot.py")
-    context = os.path.join(clawbot_dir, "context.json")
-    if not os.path.exists(clawbot):
-        sys.exit("找不到 clawbot.py：%s" % clawbot)
-    if not os.path.exists(context):
-        sys.exit("缺少 context.json：%s\n请先在微信里给该 agent 发一条消息。" % context)
-
-    fd, tmp = tempfile.mkstemp(prefix="wechat-report-", suffix=".txt")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(message)
-        result = subprocess.run([sys.executable, clawbot, "send", "--file", tmp])
-        if result.returncode != 0:
-            sys.exit("发送失败，退出码 %d" % result.returncode)
-    finally:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
+    send_via_ui(cfg, message)
 
     print("已发送给 %s：%s" % (args.agent, args.title))
     return 0

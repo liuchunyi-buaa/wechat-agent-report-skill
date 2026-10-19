@@ -1,9 +1,9 @@
 {
   "agents": {
     "daily-summary": {
-      "clawbot_dir": "/Users/liuchunyi/study/notification/clawbot",
+      "wechat_name": "每日总结 Agent",
       "max_words": 200,
-      "format": "【{title}】\n{summary}\n我的特别指示：{special}\n「{time}」"
+      "reference": "references/daily-summary.md"
     }
   }
 }
