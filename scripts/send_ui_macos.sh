@@ -18,8 +18,14 @@ run_finder() {
     fi
 }
 
-open -a /Applications/WeChat.app
-sleep 1
+# 不要主动启动微信：已经登录的客户端被再次拉起会掉到登录页。
+RUNNING=$(osascript -e 'if application "WeChat" is running then return "yes"' 2>/dev/null || true)
+if [ "$RUNNING" != "yes" ]; then
+    echo "微信未运行。请先手动启动并登录微信后重试；本脚本不会自动启动微信（重复启动会进入登录页）。" >&2
+    exit 4
+fi
+osascript -e 'tell application "WeChat" to activate' >/dev/null 2>&1 || true
+sleep 0.6
 osascript -e 'tell application "System Events" to tell process "WeChat"
     set frontmost to true
     try

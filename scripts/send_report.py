@@ -24,7 +24,14 @@ import sys
 import tempfile
 
 DEFAULT_CONFIG = os.path.expanduser("~/.claude/wechat-agent-report/config.json")
-DEFAULT_FORMAT = "【{title}】\n{summary}\n<特别说明>{special}\n「{time}」"
+DEFAULT_FORMAT = (
+    "【{project}｜{title}】\n"
+    "背景：{background}\n"
+    "{summary}\n"
+    "<特别说明>{special}\n"
+    "「{time}」"
+)
+REQUIRED_PLACEHOLDERS = ("{project}", "{title}", "{background}", "{summary}")
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +92,8 @@ if sys.platform.startswith("win"):
     _user32.GetWindowRect.restype = ctypes.c_bool
     _user32.GetClassNameW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
     _user32.GetClassNameW.restype = ctypes.c_int
+    _user32.GetWindowTextW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
+    _user32.GetWindowTextW.restype = ctypes.c_int
     _user32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.POINTER(_wt.DWORD)]
     _user32.GetWindowThreadProcessId.restype = ctypes.c_uint
     _user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
@@ -172,15 +181,23 @@ if sys.platform.startswith("win"):
             exe = os.path.basename(_process_exe(pid.value)).lower()
             if exe not in ("weixin.exe", "wechat.exe"):
                 return True
-            if not _user32.IsWindowVisible(hwnd):
-                return True
             class_name = ctypes.create_unicode_buffer(256)
             _user32.GetClassNameW(hwnd, class_name, 256)
-            if not class_name.value.endswith("QWindowIcon"):
+            name = class_name.value
+            # WeChat 4.x uses a Qt class; 3.x uses these window classes. Do not
+            # require visibility: minimising to the tray hides the main window,
+            # and treating that as "WeChat is not running" is what made callers
+            # relaunch it and land on the login page.
+            if not (
+                name.endswith("QWindowIcon")
+                or name in ("WeChatMainWndForPC", "WeChatLoginWndForPC")
+            ):
                 return True
             rect = _wt.RECT()
             if not _user32.GetWindowRect(hwnd, ctypes.byref(rect)):
                 return True
+            title = ctypes.create_unicode_buffer(512)
+            _user32.GetWindowTextW(hwnd, title, 512)
             area = (rect.right - rect.left) * (rect.bottom - rect.top)
             if area <= 0:
                 return True
@@ -194,6 +211,8 @@ if sys.platform.startswith("win"):
                     "width": rect.right - rect.left,
                     "height": rect.bottom - rect.top,
                     "area": area,
+                    "visible": bool(_user32.IsWindowVisible(hwnd)),
+                    "title": title.value,
                 }
             )
             return True
@@ -205,7 +224,70 @@ if sys.platform.startswith("win"):
         windows = _weixin_windows()
         if not windows:
             return None
-        return max(windows, key=lambda w: w["area"])["hwnd"]
+
+        def named(window):
+            title = window["title"].lower()
+            return any(k.lower() in title for k in ("微信", "wechat", "weixin"))
+
+        # Prefer the visible WeChat main window, then any visible window, then
+        # a hidden one (minimised to the tray). _activate() restores a hidden
+        # window instead of starting a second WeChat and losing the session.
+        for pool in (
+            [w for w in windows if w["visible"] and named(w)],
+            [w for w in windows if w["visible"]],
+            [w for w in windows if named(w)],
+            windows,
+        ):
+            if pool:
+                return max(pool, key=lambda w: w["area"])["hwnd"]
+
+    def _weixin_process_running():
+        """True when Weixin.exe/WeChat.exe exists, even with no window."""
+        TH32CS_SNAPPROCESS = 0x00000002
+        INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+
+        class PROCESSENTRY32W(ctypes.Structure):
+            _fields_ = [
+                ("dwSize", _wt.DWORD),
+                ("cntUsage", _wt.DWORD),
+                ("th32ProcessID", _wt.DWORD),
+                ("th32DefaultHeapID", ctypes.c_void_p),
+                ("th32ModuleID", _wt.DWORD),
+                ("cntThreads", _wt.DWORD),
+                ("th32ParentProcessID", _wt.DWORD),
+                ("pcPriClassBase", ctypes.c_long),
+                ("dwFlags", _wt.DWORD),
+                ("szExeFile", ctypes.c_wchar * 260),
+            ]
+
+        _kernel32.CreateToolhelp32Snapshot.argtypes = [ctypes.c_uint, ctypes.c_uint]
+        _kernel32.CreateToolhelp32Snapshot.restype = ctypes.c_void_p
+        _kernel32.Process32FirstW.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(PROCESSENTRY32W),
+        ]
+        _kernel32.Process32FirstW.restype = ctypes.c_bool
+        _kernel32.Process32NextW.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(PROCESSENTRY32W),
+        ]
+        _kernel32.Process32NextW.restype = ctypes.c_bool
+
+        snapshot = _kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+        if not snapshot or snapshot == INVALID_HANDLE_VALUE:
+            return False
+        try:
+            entry = PROCESSENTRY32W()
+            entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+            if not _kernel32.Process32FirstW(snapshot, ctypes.byref(entry)):
+                return False
+            while True:
+                if entry.szExeFile.lower() in ("weixin.exe", "wechat.exe"):
+                    return True
+                if not _kernel32.Process32NextW(snapshot, ctypes.byref(entry)):
+                    return False
+        finally:
+            _kernel32.CloseHandle(snapshot)
 
     def _window_rect(hwnd):
         rect = _wt.RECT()
@@ -370,9 +452,18 @@ if sys.platform.startswith("win"):
         _user32.SetProcessDPIAware()
         hwnd = _find_main_window()
         if not hwnd:
-            sys.exit("未找到微信主窗口，请先打开并登录微信桌面客户端")
+            if _weixin_process_running():
+                sys.exit(
+                    "检测到微信正在运行，但主窗口在后台或托盘里。\n"
+                    "请手动点击托盘/任务栏的微信图标打开主窗口后重试。\n"
+                    "不要重新启动微信——重复启动会进入登录页。"
+                )
+            sys.exit(
+                "微信未运行。请手动启动并登录微信桌面客户端后重试。\n"
+                "脚本不会自动启动微信。"
+            )
         if not _activate(hwnd):
-            sys.exit("无法激活微信窗口，请手动切换到微信后重试")
+            sys.exit("无法激活微信窗口，请手动切换到微信后重试（不要重新启动微信）")
 
         def ensure_foreground():
             if _user32.GetForegroundWindow() == hwnd:
@@ -403,7 +494,10 @@ if sys.platform.startswith("win"):
             scale = _window_scale(hwnd)
             contact = _find_contact_line(lines, name, 70 * scale)
             if contact is None:
-                sys.exit("在搜索结果中找不到对话「%s」，已中止发送" % name)
+                sys.exit(
+                    "在搜索结果中找不到对话「%s」，已中止发送。\n"
+                    "若微信停在登录页，请先完成登录；不要重复启动微信。" % name
+                )
             rect = _window_rect(hwnd)
             _click_screen(
                 rect.left + (contact["x0"] + contact["x1"]) / 2,
@@ -413,7 +507,10 @@ if sys.platform.startswith("win"):
 
             # 3. verify the opened chat before sending anything
             if not _chat_title_matches(hwnd, name):
-                sys.exit("打开的对话不是「%s」，已中止发送" % name)
+                sys.exit(
+                    "打开的对话不是「%s」，已中止发送。\n"
+                    "若微信停在登录页，请先完成登录；不要重复启动微信。" % name
+                )
 
             # 4. focus the message box, paste the report, send
             if not ensure_foreground():
@@ -502,24 +599,23 @@ def load_config(path):
         return json.load(f)
 
 
-def truncate(text, limit):
-    if len(text) <= limit:
-        return text, False
-    return text[: max(0, limit - 1)] + "…", True
-
-
-def build_message(fmt, title, summary, special, now, device):
+def build_message(fmt, project, title, background, summary, special, now, device):
+    fields = {
+        "{project}": project,
+        "{title}": title,
+        "{background}": background,
+        "{summary}": summary,
+        "{special}": special or "",
+        "{time}": now,
+        "{device}": device,
+    }
     lines = []
     for line in fmt.split("\n"):
         if "{special}" in line and not special:
             continue
-        lines.append(
-            line.replace("{title}", title)
-            .replace("{summary}", summary)
-            .replace("{special}", special or "")
-            .replace("{time}", now)
-            .replace("{device}", device)
-        )
+        for placeholder, value in fields.items():
+            line = line.replace(placeholder, value)
+        lines.append(line)
     return "\n".join(lines)
 
 
@@ -532,16 +628,36 @@ def cmd_list(config):
         print("%s\t%s" % (name, cfg.get("wechat_name") or cfg.get("clawbot_dir", "")))
 
 
+def _use_utf8_when_captured():
+    """Claude Code captures stdout as a pipe and decodes it as UTF-8.
+
+    Windows would otherwise emit GBK there and garble every Chinese line,
+    including the --check preview the caller is supposed to inspect. Leave an
+    interactive console alone so cmd keeps displaying Chinese correctly.
+    """
+    if not sys.platform.startswith("win"):
+        return
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if not stream.isatty():
+                stream.reconfigure(encoding="utf-8")
+        except (AttributeError, OSError, ValueError):
+            pass
+
+
 def main():
     parser = argparse.ArgumentParser(description="向配置好的微信 agent 对话发送任务完成报告")
     parser.add_argument("--config", default=os.environ.get("WECHAT_AGENT_REPORT_CONFIG", DEFAULT_CONFIG))
     parser.add_argument("--list", action="store_true", help="列出已配置的 agent")
     parser.add_argument("--agent", help="agent 名称")
-    parser.add_argument("--title", help="报告标题")
+    parser.add_argument("--project", help="项目名（必填，用于标题）")
+    parser.add_argument("--title", help="本次做了什么（必填）")
+    parser.add_argument("--background", help="项目背景（必填，一句话说明这是什么项目）")
     parser.add_argument("--summary", help="完成内容摘要")
     parser.add_argument("--file", help="从文件读取摘要")
     parser.add_argument("--special", default="", help="特别指示（可选）")
     parser.add_argument("--time", default=None, help="时间，默认当前时间")
+    parser.add_argument("--check", action="store_true", help="只生成并打印消息与字数，不发送")
     parser.add_argument("--dry-run", action="store_true", help="只定位对话并填入消息，不发送")
     args = parser.parse_args()
 
@@ -550,8 +666,19 @@ def main():
         cmd_list(config)
         return 0
 
-    if not args.agent or not args.title:
-        sys.exit("需要 --agent 和 --title")
+    if not args.agent:
+        sys.exit("需要 --agent")
+    project = (args.project or "").strip()
+    title = (args.title or "").strip()
+    background = (args.background or "").strip()
+    if not project:
+        sys.exit("需要 --project（项目名，例如 SMALL SILENT HUMAN）")
+    if not title:
+        sys.exit("需要 --title（本次做了什么）")
+    if not background:
+        sys.exit("需要 --background（一句话说明项目是什么，写给没看过这个项目的人）")
+    if background == project:
+        sys.exit("--background 不能只填项目名，请写清项目是什么（本次未发送）")
 
     agents = config.get("agents", {})
     if args.agent not in agents:
@@ -568,30 +695,54 @@ def main():
     if not summary:
         sys.exit("summary 为空")
 
+    template = resolve_template(args.config, cfg)
+    missing = [p for p in REQUIRED_PLACEHOLDERS if p not in template]
+    if missing:
+        sys.exit(
+            "模板缺少占位符 %s：请更新 %s 中的提交模板（本次未发送）"
+            % ("、".join(missing), args.config)
+        )
+
     limit = int(cfg.get("max_words", 200))
-    summary, truncated = truncate(summary, limit)
-    if truncated:
-        print("警告：摘要超过 %d 字，已截断" % limit, file=sys.stderr)
+    used = len(background) + len(summary)
+    if used > limit:
+        sys.exit(
+            "内容超长：背景 %d 字 + 摘要 %d 字 = %d 字，超过 %d 字上限。\n"
+            "请压缩摘要后重试（本次未发送；不要依赖截断，接收方会看到残缺内容）。"
+            % (len(background), len(summary), used, limit)
+        )
 
     now = args.time or datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     device = socket.gethostname().split(".")[0]
     message = build_message(
-        resolve_template(args.config, cfg),
-        args.title.strip(),
+        template,
+        project,
+        title,
+        background,
         summary,
         args.special.strip(),
         now,
         device,
     )
 
+    if args.check:
+        print(message)
+        print()
+        print(
+            "— 背景 %d 字 + 摘要 %d 字 = %d / %d 字（未发送）"
+            % (len(background), len(summary), used, limit)
+        )
+        return 0
+
     send_via_ui(cfg, message, args.dry_run)
 
     if args.dry_run:
-        print("dry run 完成（未发送）：%s" % args.title)
+        print("dry run 完成（未发送）：%s" % title)
     else:
-        print("已发送给 %s：%s" % (args.agent, args.title))
+        print("已发送给 %s：%s" % (args.agent, title))
     return 0
 
 
 if __name__ == "__main__":
+    _use_utf8_when_captured()
     sys.exit(main())
